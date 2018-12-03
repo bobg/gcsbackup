@@ -11,7 +11,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -34,20 +33,10 @@ func main() {
 
 	ctx := context.Background()
 
-	creds, err := ioutil.ReadFile(*credsFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	ts, err := newTokenSource(ctx, creds)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	client, err := storage.NewClient(
 		ctx,
 		option.WithScopes(storage.ScopeFullControl),
-		option.WithTokenSource(ts),
+		option.WithCredentialsFile(*credsFile),
 	)
 	if err != nil {
 		log.Fatal(err)
