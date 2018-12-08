@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -84,34 +83,42 @@ func main() {
 
 			log.Printf("uploading %s, hash %s", path, name)
 
-			w := obj.NewWriter(ctx)
-			err = atime.WithTimesRestored(path, func(r io.ReadSeeker) error {
-				_, err := io.Copy(w, r)
-				return err
-			})
-			if err != nil {
-				return errors.Wrapf(err, "uploading content for %s (path %s)", name, path)
-			}
-			err = w.Close()
-			if err != nil {
+			err = withRetries(3, time.Minute, func() error {
+				w := obj.NewWriter(ctx)
+				err := atime.WithTimesRestored(path, func(r io.ReadSeeker) error {
+					_, err := io.Copy(w, r)
+					return err
+				})
+				if err != nil {
+					return errors.Wrapf(err, "uploading content for %s (path %s)", name, path)
+				}
+				err = w.Close()
 				return errors.Wrapf(err, "closing upload channel for %s (path %s)", name, path)
-			}
-			_, err = obj.Update(ctx, storage.ObjectAttrsToUpdate{
-				Metadata: metadata,
 			})
 			if err != nil {
+				return err
+			}
+
+			err = withRetries(3, time.Minute, func() error {
+				_, err := obj.Update(ctx, storage.ObjectAttrsToUpdate{
+					Metadata: metadata,
+				})
 				return errors.Wrapf(err, "storing attrs for %s (path %s)", name, path)
+			})
+			if err != nil {
+				return err
 			}
 
 		case nil:
-			if len(attrs.Metadata) == 0 {
-				return fmt.Errorf("no metadata on %s (path %s)", name, path)
-			}
-
 			var paths map[string]int64
-			err = json.Unmarshal([]byte(attrs.Metadata["paths"]), &paths)
-			if err != nil {
-				return errors.Wrapf(err, "decoding paths attr for %s (path %s)", name, path)
+
+			if len(attrs.Metadata) == 0 {
+				paths = make(map[string]int64)
+			} else {
+				err = json.Unmarshal([]byte(attrs.Metadata["paths"]), &paths)
+				if err != nil {
+					return errors.Wrapf(err, "decoding paths attr for %s (path %s)", name, path)
+				}
 			}
 
 			if _, ok := paths[path]; ok {
@@ -131,12 +138,13 @@ func main() {
 				metadata := map[string]string{
 					"paths": string(j),
 				}
-				_, err = obj.Update(ctx, storage.ObjectAttrsToUpdate{
-					Metadata: metadata,
-				})
-				if err != nil {
+
+				err = withRetries(3, time.Minute, func() error {
+					_, err := obj.Update(ctx, storage.ObjectAttrsToUpdate{
+						Metadata: metadata,
+					})
 					return errors.Wrapf(err, "updating attrs for %s (path %s)", name, path)
-				}
+				})
 			}
 
 		default:
@@ -147,5 +155,18 @@ func main() {
 	})
 	if err != nil {
 		log.Fatal(err)
+	}
+}
+
+func withRetries(num int, interval time.Duration, f func() error) error {
+	var try int
+	for {
+		try++
+		err := f()
+		if err == nil || try >= num {
+			return err
+		}
+		log.Printf("error %s, try %d of %d, will retry in %s", err, try, num, interval)
+		time.Sleep(interval)
 	}
 }
