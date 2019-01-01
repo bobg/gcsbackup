@@ -25,7 +25,6 @@ func main() {
 	var (
 		credsFile  = flag.String("creds", "", "filename for JSON-encoded credentials")
 		bucketName = flag.String("bucket", "", "bucket name")
-		root       = flag.String("root", "", "root dir")
 	)
 
 	flag.Parse()
@@ -42,119 +41,121 @@ func main() {
 	}
 	bucket := client.Bucket(*bucketName)
 
-	err = filepath.Walk(*root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		var hash []byte
-		err = atime.WithTimesRestored(path, func(r io.ReadSeeker) error {
-			hasher := sha256.New()
-			_, err = io.Copy(hasher, r)
+	for _, root := range flag.Args() {
+		err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return errors.Wrapf(err, "hashing %s", path)
-			}
-			hash = hasher.Sum(nil)
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-
-		name := "sha256-" + hex.EncodeToString(hash)
-		obj := bucket.Object(name)
-		attrs, err := obj.Attrs(ctx)
-		switch err {
-		case storage.ErrObjectNotExist:
-			paths := map[string]int64{
-				path: time.Now().Unix(),
-			}
-			j, err := json.Marshal(paths)
-			if err != nil {
-				return errors.Wrapf(err, "encoding new paths attr for %s (path %s)", name, path)
-			}
-			metadata := map[string]string{
-				"paths": string(j),
+				return err
 			}
 
-			log.Printf("uploading %s, hash %s", path, name)
+			if info.IsDir() {
+				return nil
+			}
 
-			err = withRetries(3, time.Minute, func() error {
-				w := obj.NewWriter(ctx)
-				err := atime.WithTimesRestored(path, func(r io.ReadSeeker) error {
-					_, err := io.Copy(w, r)
-					return err
-				})
+			var hash []byte
+			err = atime.WithTimesRestored(path, func(r io.ReadSeeker) error {
+				hasher := sha256.New()
+				_, err = io.Copy(hasher, r)
 				if err != nil {
-					return errors.Wrapf(err, "uploading content for %s (path %s)", name, path)
+					return errors.Wrapf(err, "hashing %s", path)
 				}
-				err = w.Close()
-				return errors.Wrapf(err, "closing upload channel for %s (path %s)", name, path)
+				hash = hasher.Sum(nil)
+				return nil
 			})
 			if err != nil {
 				return err
 			}
 
-			err = withRetries(3, time.Minute, func() error {
-				_, err := obj.Update(ctx, storage.ObjectAttrsToUpdate{
-					Metadata: metadata,
-				})
-				return errors.Wrapf(err, "storing attrs for %s (path %s)", name, path)
-			})
-			if err != nil {
-				return err
-			}
-
-		case nil:
-			var paths map[string]int64
-
-			if len(attrs.Metadata) == 0 {
-				paths = make(map[string]int64)
-			} else {
-				err = json.Unmarshal([]byte(attrs.Metadata["paths"]), &paths)
-				if err != nil {
-					return errors.Wrapf(err, "decoding paths attr for %s (path %s)", name, path)
+			name := "sha256-" + hex.EncodeToString(hash)
+			obj := bucket.Object(name)
+			attrs, err := obj.Attrs(ctx)
+			switch err {
+			case storage.ErrObjectNotExist:
+				paths := map[string]int64{
+					path: time.Now().Unix(),
 				}
-			}
-
-			if _, ok := paths[path]; ok {
-				log.Printf("%s already present (hash %s)", path, name)
-			} else {
-				var oldpaths []string
-				for k := range paths {
-					oldpaths = append(oldpaths, k)
-				}
-				log.Printf("%s already present as %v (hash %s), adding new path", path, oldpaths, name)
-
-				paths[path] = time.Now().Unix()
 				j, err := json.Marshal(paths)
 				if err != nil {
-					return errors.Wrapf(err, "encoding updated paths attr for %s (path %s)", name, path)
+					return errors.Wrapf(err, "encoding new paths attr for %s (path %s)", name, path)
 				}
 				metadata := map[string]string{
 					"paths": string(j),
+				}
+
+				log.Printf("uploading %s, hash %s", path, name)
+
+				err = withRetries(3, time.Minute, func() error {
+					w := obj.NewWriter(ctx)
+					err := atime.WithTimesRestored(path, func(r io.ReadSeeker) error {
+						_, err := io.Copy(w, r)
+						return err
+					})
+					if err != nil {
+						return errors.Wrapf(err, "uploading content for %s (path %s)", name, path)
+					}
+					err = w.Close()
+					return errors.Wrapf(err, "closing upload channel for %s (path %s)", name, path)
+				})
+				if err != nil {
+					return err
 				}
 
 				err = withRetries(3, time.Minute, func() error {
 					_, err := obj.Update(ctx, storage.ObjectAttrsToUpdate{
 						Metadata: metadata,
 					})
-					return errors.Wrapf(err, "updating attrs for %s (path %s)", name, path)
+					return errors.Wrapf(err, "storing attrs for %s (path %s)", name, path)
 				})
+				if err != nil {
+					return err
+				}
+
+			case nil:
+				var paths map[string]int64
+
+				if len(attrs.Metadata) == 0 {
+					paths = make(map[string]int64)
+				} else {
+					err = json.Unmarshal([]byte(attrs.Metadata["paths"]), &paths)
+					if err != nil {
+						return errors.Wrapf(err, "decoding paths attr for %s (path %s)", name, path)
+					}
+				}
+
+				if _, ok := paths[path]; ok {
+					log.Printf("%s already present (hash %s)", path, name)
+				} else {
+					var oldpaths []string
+					for k := range paths {
+						oldpaths = append(oldpaths, k)
+					}
+					log.Printf("%s already present as %v (hash %s), adding new path", path, oldpaths, name)
+
+					paths[path] = time.Now().Unix()
+					j, err := json.Marshal(paths)
+					if err != nil {
+						return errors.Wrapf(err, "encoding updated paths attr for %s (path %s)", name, path)
+					}
+					metadata := map[string]string{
+						"paths": string(j),
+					}
+
+					err = withRetries(3, time.Minute, func() error {
+						_, err := obj.Update(ctx, storage.ObjectAttrsToUpdate{
+							Metadata: metadata,
+						})
+						return errors.Wrapf(err, "updating attrs for %s (path %s)", name, path)
+					})
+				}
+
+			default:
+				return errors.Wrapf(err, "getting attrs for %s (path %s)", name, path)
 			}
 
-		default:
-			return errors.Wrapf(err, "getting attrs for %s (path %s)", name, path)
+			return nil
+		})
+		if err != nil {
+			log.Fatal(err)
 		}
-
-		return nil
-	})
-	if err != nil {
-		log.Fatal(err)
 	}
 }
 
