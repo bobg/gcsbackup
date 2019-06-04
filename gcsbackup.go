@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
-	"github.com/bobg/atime"
+	"github.com/bobg/atime/v2"
 	"github.com/pkg/errors"
 	"google.golang.org/api/option"
 )
