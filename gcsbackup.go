@@ -11,6 +11,7 @@ import (
 	"flag"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -44,7 +45,7 @@ func main() {
 
 	var limiter *rate.Limiter
 	if *throttle > 0 {
-		limiter = rate.NewLimiter(rate.Limit(*throttle), 1)
+		limiter = rate.NewLimiter(rate.Limit(*throttle), math.MaxInt)
 	}
 
 	for _, root := range flag.Args() {
