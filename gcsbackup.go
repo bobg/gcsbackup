@@ -67,6 +67,10 @@ func main() {
 				log.Printf("Skipping symlink %s", path)
 				return nil
 			}
+			if info.Size() == 0 {
+				log.Printf("Skipping empty file %s", path)
+				return nil
+			}
 
 			var hash []byte
 			err = atime.WithTimesRestored(path, func(r io.ReadSeeker) error {
@@ -102,7 +106,7 @@ func main() {
 					"paths": string(j),
 				}
 
-				log.Printf("uploading %s, hash %s", path, name)
+				log.Printf("uploading %s, %d bytes, hash %s", path, info.Size(), name)
 
 				err = withRetries(bkoff, func() error {
 					var w io.WriteCloser = obj.NewWriter(ctx)
