@@ -1,6 +1,6 @@
 // Command gcsbackup walks a directory tree,
 // copying files to a google cloud storage bucket
-// based on their MD5 hash.
+// based on their SHA256 hash.
 package main
 
 import (
@@ -18,15 +18,16 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/bobg/atime/v2"
 	"github.com/pkg/errors"
+	"golang.org/x/time/rate"
 	"google.golang.org/api/option"
 )
 
 func main() {
 	var (
-		credsFile  = flag.String("creds", "", "filename for JSON-encoded credentials")
+		credsFile  = flag.String("creds", "creds.json", "filename for JSON-encoded credentials")
 		bucketName = flag.String("bucket", "", "bucket name")
+		throttle   = flag.Int("throttle", 0, "upload bytes per second (default 0 is unlimited)")
 	)
-
 	flag.Parse()
 
 	ctx := context.Background()
@@ -40,6 +41,11 @@ func main() {
 		log.Fatal(err)
 	}
 	bucket := client.Bucket(*bucketName)
+
+	var limiter *rate.Limiter
+	if *throttle > 0 {
+		limiter = rate.NewLimiter(rate.Limit(*throttle), 1)
+	}
 
 	for _, root := range flag.Args() {
 		err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -68,8 +74,7 @@ func main() {
 			name := "sha256-" + hex.EncodeToString(hash)
 			obj := bucket.Object(name)
 			attrs, err := obj.Attrs(ctx)
-			switch err {
-			case storage.ErrObjectNotExist:
+			if errors.Is(err, storage.ErrObjectNotExist) {
 				paths := map[string]int64{
 					path: time.Now().Unix(),
 				}
@@ -84,7 +89,12 @@ func main() {
 				log.Printf("uploading %s, hash %s", path, name)
 
 				err = withRetries(3, time.Minute, func() error {
-					w := obj.NewWriter(ctx)
+					var w io.WriteCloser = obj.NewWriter(ctx)
+
+					if limiter != nil {
+						w = &limitingWriter{ctx: ctx, limiter: limiter, w: w}
+					}
+
 					err := atime.WithTimesRestored(path, func(r io.ReadSeeker) error {
 						_, err := io.Copy(w, r)
 						return err
@@ -108,8 +118,9 @@ func main() {
 				if err != nil {
 					return err
 				}
-
-			case nil:
+			} else if err != nil {
+				return errors.Wrapf(err, "getting attrs for %s (path %s)", name, path)
+			} else {
 				var paths map[string]int64
 
 				if len(attrs.Metadata) == 0 {
@@ -146,9 +157,6 @@ func main() {
 						return errors.Wrapf(err, "updating attrs for %s (path %s)", name, path)
 					})
 				}
-
-			default:
-				return errors.Wrapf(err, "getting attrs for %s (path %s)", name, path)
 			}
 
 			return nil
@@ -170,4 +178,21 @@ func withRetries(num int, interval time.Duration, f func() error) error {
 		log.Printf("error %s, try %d of %d, will retry in %s", err, try, num, interval)
 		time.Sleep(interval)
 	}
+}
+
+type limitingWriter struct {
+	ctx     context.Context
+	limiter *rate.Limiter
+	w       io.WriteCloser
+}
+
+func (w *limitingWriter) Write(buf []byte) (int, error) {
+	if err := w.limiter.WaitN(w.ctx, len(buf)); err != nil {
+		return 0, err
+	}
+	return w.w.Write(buf)
+}
+
+func (w *limitingWriter) Close() error {
+	return w.w.Close()
 }
