@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"flag"
 	"io"
+	"io/fs"
 	"log"
 	"math"
 	"os"
@@ -18,6 +19,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/bobg/atime/v2"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/pkg/errors"
 	"golang.org/x/time/rate"
 	"google.golang.org/api/option"
@@ -48,13 +50,21 @@ func main() {
 		limiter = rate.NewLimiter(rate.Limit(*throttle), math.MaxInt)
 	}
 
+	expBkoff := backoff.NewExponentialBackOff()
+	expBkoff.InitialInterval = 10 * time.Second
+	bkoff := backoff.WithMaxRetries(expBkoff, 3)
+	bkoff = backoff.WithContext(bkoff, ctx)
+
 	for _, root := range flag.Args() {
 		err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-
 			if info.IsDir() {
+				return nil
+			}
+			if (info.Mode() & fs.ModeSymlink) == fs.ModeSymlink {
+				log.Printf("Skipping symlink %s", path)
 				return nil
 			}
 
@@ -74,7 +84,12 @@ func main() {
 
 			name := "sha256-" + hex.EncodeToString(hash)
 			obj := bucket.Object(name)
+
 			attrs, err := obj.Attrs(ctx)
+			if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
+				return errors.Wrapf(err, "getting attrs for %s (path %s)", name, path)
+			}
+
 			if errors.Is(err, storage.ErrObjectNotExist) {
 				paths := map[string]int64{
 					path: time.Now().Unix(),
@@ -89,7 +104,7 @@ func main() {
 
 				log.Printf("uploading %s, hash %s", path, name)
 
-				err = withRetries(3, time.Minute, func() error {
+				err = withRetries(bkoff, func() error {
 					var w io.WriteCloser = obj.NewWriter(ctx)
 
 					if limiter != nil {
@@ -110,57 +125,49 @@ func main() {
 					return err
 				}
 
-				err = withRetries(3, time.Minute, func() error {
+				return withRetries(bkoff, func() error {
 					_, err := obj.Update(ctx, storage.ObjectAttrsToUpdate{
 						Metadata: metadata,
 					})
 					return errors.Wrapf(err, "storing attrs for %s (path %s)", name, path)
 				})
-				if err != nil {
-					return err
-				}
-			} else if err != nil {
-				return errors.Wrapf(err, "getting attrs for %s (path %s)", name, path)
+			}
+
+			var paths map[string]int64
+			if len(attrs.Metadata) == 0 {
+				paths = make(map[string]int64)
 			} else {
-				var paths map[string]int64
-
-				if len(attrs.Metadata) == 0 {
-					paths = make(map[string]int64)
-				} else {
-					err = json.Unmarshal([]byte(attrs.Metadata["paths"]), &paths)
-					if err != nil {
-						return errors.Wrapf(err, "decoding paths attr for %s (path %s)", name, path)
-					}
-				}
-
-				if _, ok := paths[path]; ok {
-					log.Printf("%s already present (hash %s)", path, name)
-				} else {
-					var oldpaths []string
-					for k := range paths {
-						oldpaths = append(oldpaths, k)
-					}
-					log.Printf("%s already present as %v (hash %s), adding new path", path, oldpaths, name)
-
-					paths[path] = time.Now().Unix()
-					j, err := json.Marshal(paths)
-					if err != nil {
-						return errors.Wrapf(err, "encoding updated paths attr for %s (path %s)", name, path)
-					}
-					metadata := map[string]string{
-						"paths": string(j),
-					}
-
-					err = withRetries(3, time.Minute, func() error {
-						_, err := obj.Update(ctx, storage.ObjectAttrsToUpdate{
-							Metadata: metadata,
-						})
-						return errors.Wrapf(err, "updating attrs for %s (path %s)", name, path)
-					})
+				if err = json.Unmarshal([]byte(attrs.Metadata["paths"]), &paths); err != nil {
+					return errors.Wrapf(err, "decoding paths attr for %s (path %s)", name, path)
 				}
 			}
 
-			return nil
+			if _, ok := paths[path]; ok {
+				log.Printf("%s already present (hash %s)", path, name)
+				return nil
+			}
+
+			var oldpaths []string
+			for k := range paths {
+				oldpaths = append(oldpaths, k)
+			}
+			log.Printf("%s already present as %v (hash %s), adding new path", path, oldpaths, name)
+
+			paths[path] = time.Now().Unix()
+			j, err := json.Marshal(paths)
+			if err != nil {
+				return errors.Wrapf(err, "encoding updated paths attr for %s (path %s)", name, path)
+			}
+			metadata := map[string]string{
+				"paths": string(j),
+			}
+
+			return withRetries(bkoff, func() error {
+				_, err := obj.Update(ctx, storage.ObjectAttrsToUpdate{
+					Metadata: metadata,
+				})
+				return errors.Wrapf(err, "updating attrs for %s (path %s)", name, path)
+			})
 		})
 		if err != nil {
 			log.Fatal(err)
@@ -168,17 +175,9 @@ func main() {
 	}
 }
 
-func withRetries(num int, interval time.Duration, f func() error) error {
-	var try int
-	for {
-		try++
-		err := f()
-		if err == nil || try >= num {
-			return err
-		}
-		log.Printf("error %s, try %d of %d, will retry in %s", err, try, num, interval)
-		time.Sleep(interval)
-	}
+func withRetries(bkoff backoff.BackOff, f func() error) error {
+	bkoff.Reset()
+	return backoff.Retry(f, bkoff) // The backoff API gets the order of these arguments wrong.
 }
 
 type limitingWriter struct {
