@@ -21,6 +21,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/bobg/atime/v2"
+	"github.com/bobg/subcmd/v2"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/pkg/errors"
 	"golang.org/x/time/rate"
@@ -29,32 +30,11 @@ import (
 
 func main() {
 	var (
-		credsFile   = flag.String("creds", "creds.json", "filename for JSON-encoded credentials")
-		bucketName  = flag.String("bucket", "", "bucket name")
-		excludeFrom = flag.String("exclude-from", "", "file of exclude patterns")
-		throttle    = flag.Int("throttle", 0, "upload bytes per second (default 0 is unlimited)")
+		credsFile  = flag.String("creds", "creds.json", "filename for JSON-encoded credentials")
+		bucketName = flag.String("bucket", "", "bucket name")
+		throttle   = flag.Int("throttle", 0, "upload bytes per second (default 0 is unlimited)")
 	)
 	flag.Parse()
-
-	var excludePatterns []*regexp.Regexp
-	if *excludeFrom != "" {
-		f, err := os.Open(*excludeFrom)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()
-		sc := bufio.NewScanner(f)
-		for sc.Scan() {
-			regex, err := regexp.Compile(sc.Text())
-			if err != nil {
-				log.Fatalf("Compiling exclude pattern %s: %s", sc.Text(), err)
-			}
-			excludePatterns = append(excludePatterns, regex)
-		}
-		if err := sc.Err(); err != nil {
-			log.Fatal(err)
-		}
-	}
 
 	ctx := context.Background()
 
@@ -73,13 +53,57 @@ func main() {
 		limiter = rate.NewLimiter(rate.Limit(*throttle), math.MaxInt)
 	}
 
+	c := maincmd{
+		bucket:  bucket,
+		limiter: limiter,
+	}
+
+	if err := subcmd.Run(ctx, c, flag.Args()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+type maincmd struct {
+	bucket  *storage.BucketHandle
+	limiter *rate.Limiter
+}
+
+func (c maincmd) Subcmds() subcmd.Map {
+	return subcmd.Commands(
+		"save", c.doSave, "save files to GCS", subcmd.Params(
+			"-exclude-from", subcmd.String, "", "file of exclude patterns (unanchored regexes)",
+		),
+	)
+}
+
+func (c maincmd) doSave(ctx context.Context, excludeFrom string, args []string) error {
+	var excludePatterns []*regexp.Regexp
+	if excludeFrom != "" {
+		f, err := os.Open(excludeFrom)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			regex, err := regexp.Compile(sc.Text())
+			if err != nil {
+				log.Fatalf("Compiling exclude pattern %s: %s", sc.Text(), err)
+			}
+			excludePatterns = append(excludePatterns, regex)
+		}
+		if err := sc.Err(); err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	expBkoff := backoff.NewExponentialBackOff()
 	expBkoff.InitialInterval = 10 * time.Second
 	bkoff := backoff.WithMaxRetries(expBkoff, 3)
 	bkoff = backoff.WithContext(bkoff, ctx)
 
 	for _, root := range flag.Args() {
-		err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
@@ -117,7 +141,7 @@ func main() {
 			}
 
 			name := "sha256-" + hex.EncodeToString(hash)
-			obj := bucket.Object(name)
+			obj := c.bucket.Object(name)
 
 			attrs, err := obj.Attrs(ctx)
 			if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
@@ -141,8 +165,8 @@ func main() {
 				err = withRetries(bkoff, func() error {
 					var w io.WriteCloser = obj.NewWriter(ctx)
 
-					if limiter != nil {
-						w = &limitingWriter{ctx: ctx, limiter: limiter, w: w}
+					if c.limiter != nil {
+						w = &limitingWriter{ctx: ctx, limiter: c.limiter, w: w}
 					}
 
 					err := atime.WithTimesRestored(path, func(r io.ReadSeeker) error {
@@ -204,9 +228,11 @@ func main() {
 			})
 		})
 		if err != nil {
-			log.Fatal(err)
+			return errors.Wrapf(err, "in walk of %s", root)
 		}
 	}
+
+	return nil
 }
 
 func withRetries(bkoff backoff.BackOff, f func() error) error {
