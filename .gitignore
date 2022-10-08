@@ -1,3 +1,5 @@
 /CMD
+/EXCLUDE
 /creds.json
 /gcsbackup
+/_old
