@@ -14,7 +14,7 @@ import (
 func (c maincmd) doList(ctx context.Context, _ []string) error {
 	var (
 		enc   = json.NewEncoder(os.Stdout)
-		query = new(storage.Query)
+		query = &storage.Query{Projection: storage.ProjectionNoACL}
 		it    = c.bucket.Objects(ctx, query)
 	)
 	enc.SetIndent("", "  ")
@@ -36,23 +36,27 @@ func (c maincmd) doList(ctx context.Context, _ []string) error {
 			}
 		}
 
+		pathtimes := make(map[string]time.Time)
 		for path, unixtime := range paths {
-			out := listType{
-				Path:      path,
-				Timestamp: time.Unix(unixtime, 0),
-				Hash:      attrs.Name,
-				Link:      attrs.MediaLink,
-			}
-			if err = enc.Encode(out); err != nil {
-				return errors.Wrapf(err, "JSON-encoding output for %s, path %s", attrs.Name, path)
-			}
+			pathtimes[path] = time.Unix(unixtime, 0)
+		}
+
+		out := listType{
+			Paths: pathtimes,
+			Size:  attrs.Size,
+			Hash:  attrs.Name,
+			Link:  attrs.MediaLink,
+		}
+		if err = enc.Encode(out); err != nil {
+			return errors.Wrapf(err, "JSON-encoding output for %s", attrs.Name)
 		}
 	}
 }
 
 type listType struct {
-	Path      string    `json:"path"`
-	Timestamp time.Time `json:"timestamp"`
-	Hash      string    `json:"hash"`
-	Link      string    `json:"link,omitempty"`
+	Paths     map[string]time.Time `json:"paths"`
+	Size      int64                `json:"size"`
+	Timestamp time.Time            `json:"timestamp"`
+	Hash      string               `json:"hash"`
+	Link      string               `json:"link,omitempty"`
 }
