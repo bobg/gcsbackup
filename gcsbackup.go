@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -15,6 +16,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -27,11 +29,32 @@ import (
 
 func main() {
 	var (
-		credsFile  = flag.String("creds", "creds.json", "filename for JSON-encoded credentials")
-		bucketName = flag.String("bucket", "", "bucket name")
-		throttle   = flag.Int("throttle", 0, "upload bytes per second (default 0 is unlimited)")
+		credsFile   = flag.String("creds", "creds.json", "filename for JSON-encoded credentials")
+		bucketName  = flag.String("bucket", "", "bucket name")
+		excludeFrom = flag.String("exclude-from", "", "file of exclude patterns")
+		throttle    = flag.Int("throttle", 0, "upload bytes per second (default 0 is unlimited)")
 	)
 	flag.Parse()
+
+	var excludePatterns []*regexp.Regexp
+	if *excludeFrom != "" {
+		f, err := os.Open(*excludeFrom)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			regex, err := regexp.Compile(sc.Text())
+			if err != nil {
+				log.Fatalf("Compiling exclude pattern %s: %s", sc.Text(), err)
+			}
+			excludePatterns = append(excludePatterns, regex)
+		}
+		if err := sc.Err(); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	ctx := context.Background()
 
@@ -70,6 +93,13 @@ func main() {
 			if info.Size() == 0 {
 				log.Printf("Skipping empty file %s", path)
 				return nil
+			}
+
+			for _, regex := range excludePatterns {
+				if regex.MatchString(path) {
+					log.Printf("Skipping excluded file %s", path)
+					return nil
+				}
 			}
 
 			var hash []byte
