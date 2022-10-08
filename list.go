@@ -45,7 +45,6 @@ func (c maincmd) doList(ctx context.Context, _ []string) error {
 			Paths: pathtimes,
 			Size:  attrs.Size,
 			Hash:  attrs.Name,
-			Link:  attrs.MediaLink,
 		}
 		if err = enc.Encode(out); err != nil {
 			return errors.Wrapf(err, "JSON-encoding output for %s", attrs.Name)
@@ -58,5 +57,4 @@ type listType struct {
 	Size      int64                `json:"size"`
 	Timestamp time.Time            `json:"timestamp"`
 	Hash      string               `json:"hash"`
-	Link      string               `json:"link,omitempty"`
 }
