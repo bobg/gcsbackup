@@ -53,8 +53,7 @@ func (c maincmd) doList(ctx context.Context, _ []string) error {
 }
 
 type listType struct {
-	Paths     map[string]time.Time `json:"paths"`
-	Size      int64                `json:"size"`
-	Timestamp time.Time            `json:"timestamp"`
-	Hash      string               `json:"hash"`
+	Paths map[string]time.Time `json:"paths"`
+	Size  int64                `json:"size"`
+	Hash  string               `json:"hash"`
 }

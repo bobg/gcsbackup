@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"io"
 	"io/fs"
 	"log"
@@ -48,7 +47,7 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, args []string) 
 	bkoff := backoff.WithMaxRetries(expBkoff, 3)
 	bkoff = backoff.WithContext(bkoff, ctx)
 
-	for _, root := range flag.Args() {
+	for _, root := range args {
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
