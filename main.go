@@ -41,8 +41,9 @@ func main() {
 	}
 
 	c := maincmd{
-		bucket:  bucket,
-		limiter: limiter,
+		bucketname: *bucketName,
+		bucket:     bucket,
+		limiter:    limiter,
 	}
 
 	if err := subcmd.Run(ctx, c, flag.Args()); err != nil {
@@ -51,8 +52,9 @@ func main() {
 }
 
 type maincmd struct {
-	bucket  *storage.BucketHandle
-	limiter *rate.Limiter
+	bucketname string
+	bucket     *storage.BucketHandle
+	limiter    *rate.Limiter
 }
 
 func (c maincmd) Subcmds() subcmd.Map {
@@ -61,5 +63,9 @@ func (c maincmd) Subcmds() subcmd.Map {
 			"-exclude-from", subcmd.String, "", "file of exclude patterns (unanchored regexes)",
 		),
 		"list", c.doList, "list bucket objects", nil,
+		"fs", c.doFS, "serve a FUSE filesystem", subcmd.Params(
+			"-name", subcmd.String, c.bucketname, "file system name",
+			"mount", subcmd.String, "", "mount point",
+		),
 	)
 }
