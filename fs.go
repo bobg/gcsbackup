@@ -22,11 +22,13 @@ import (
 
 func (c maincmd) doFS(ctx context.Context, name string, mountpoint string, _ []string) error {
 	start := time.Now()
+
 	log.Print("Building file system, please wait")
-	f, err := buildFS(ctx, c)
-	if err != nil {
+	f := newFS(c.bucket)
+	if err := f.build(ctx); err != nil {
 		return errors.Wrapf(err, "building filesystem")
 	}
+
 	conn, err := fuse.Mount(
 		mountpoint,
 		fuse.FSName(name),
@@ -51,6 +53,19 @@ type FS struct {
 }
 
 var _ fs.FS = &FS{}
+
+func newFS(bucket *storage.BucketHandle) *FS {
+	f := &FS{
+		bucket:    bucket,
+		nextInode: 2,
+	}
+	f.root = &FSNode{
+		fs:       f,
+		inode:    1,
+		children: make(map[string]*FSNode),
+	}
+	return f
+}
 
 func (f *FS) allocateInode() uint64 {
 	f.mu.Lock()
@@ -82,23 +97,19 @@ type FSNode struct {
 	size      uint64
 }
 
-func buildFS(ctx context.Context, c maincmd) (*FS, error) {
+func (f *FS) build(ctx context.Context) error {
 	var (
-		f     = &FS{bucket: c.bucket, nextInode: 2}
-		root  = &FSNode{fs: f, children: make(map[string]*FSNode), inode: 1}
 		query = &storage.Query{Projection: storage.ProjectionNoACL}
-		it    = c.bucket.Objects(ctx, query)
+		it    = f.bucket.Objects(ctx, query)
 	)
-
-	f.root = root
 
 	for {
 		attrs, err := it.Next()
 		if errors.Is(err, iterator.Done) {
-			return &FS{bucket: c.bucket, root: root}, nil
+			return nil
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if len(attrs.Metadata) == 0 {
 			fmt.Printf("WARNING: no paths defined for object %s\n", attrs.Name)

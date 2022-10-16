@@ -21,7 +21,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-func (c maincmd) doSave(ctx context.Context, excludeFrom string, args []string) error {
+func (c maincmd) doSave(ctx context.Context, excludeFrom string, prescan bool, args []string) error {
 	var excludePatterns []*regexp.Regexp
 	if excludeFrom != "" {
 		f, err := os.Open(excludeFrom)
@@ -47,6 +47,16 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, args []string) 
 	bkoff := backoff.WithMaxRetries(expBkoff, 3)
 	bkoff = backoff.WithContext(bkoff, ctx)
 
+	var tree *FSNode
+	if prescan {
+		log.Print("Prescanning, please wait")
+		f := newFS(c.bucket)
+		if err := f.build(ctx); err != nil {
+			return errors.Wrapf(err, "in prescan")
+		}
+		tree = f.root
+	}
+
 	for _, root := range args {
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -63,10 +73,27 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, args []string) 
 				log.Printf("Skipping empty file %s", path)
 				return nil
 			}
-
 			for _, regex := range excludePatterns {
 				if regex.MatchString(path) {
 					log.Printf("Skipping excluded file %s", path)
+					return nil
+				}
+			}
+
+			var node *FSNode
+			if tree != nil {
+				node, err = tree.findNode(path, false)
+				if err != nil {
+					// Ignore errors.
+					node = nil
+				} else if node.hash == "" {
+					node = nil
+				}
+			}
+
+			if node != nil {
+				if uint64(info.Size()) == node.size && !info.ModTime().After(node.timestamp) {
+					log.Printf("Found a prescan size/modtime match for %s", path)
 					return nil
 				}
 			}
@@ -86,8 +113,13 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, args []string) 
 			}
 
 			name := "sha256-" + hex.EncodeToString(hash)
-			obj := c.bucket.Object(name)
 
+			if node != nil && node.hash == name {
+				log.Printf("Found a prescan hash match for %s", path)
+				return nil
+			}
+
+			obj := c.bucket.Object(name)
 			attrs, err := obj.Attrs(ctx)
 			if err != nil && !errors.Is(err, storage.ErrObjectNotExist) {
 				return errors.Wrapf(err, "getting attrs for %s (path %s)", name, path)
