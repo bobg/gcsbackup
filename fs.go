@@ -20,13 +20,13 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-func (c maincmd) doFS(ctx context.Context, name string, mountpoint string, _ []string) error {
+func (c maincmd) doFS(ctx context.Context, name, listfile, mountpoint string, _ []string) error {
 	start := time.Now()
 
 	log.Print("Building file system, please wait")
-	f := newFS(c.bucket)
-	if err := f.build(ctx); err != nil {
-		return errors.Wrapf(err, "building filesystem")
+	f, err := newFS(ctx, c.bucket, listfile)
+	if err != nil {
+		return errors.Wrap(err, "building filesystem")
 	}
 
 	conn, err := fuse.Mount(
@@ -54,7 +54,7 @@ type FS struct {
 
 var _ fs.FS = &FS{}
 
-func newFS(bucket *storage.BucketHandle) *FS {
+func newFS(ctx context.Context, bucket *storage.BucketHandle, fromfile string) (*FS, error) {
 	f := &FS{
 		bucket:    bucket,
 		nextInode: 2,
@@ -64,7 +64,80 @@ func newFS(bucket *storage.BucketHandle) *FS {
 		inode:    1,
 		children: make(map[string]*FSNode),
 	}
-	return f
+
+	if fromfile == "" {
+		// Build filesystem from a scan of the bucket.
+
+		var (
+			query = &storage.Query{Projection: storage.ProjectionNoACL}
+			it    = f.bucket.Objects(ctx, query)
+		)
+		for {
+			attrs, err := it.Next()
+			if errors.Is(err, iterator.Done) {
+				return f, nil
+			}
+			if err != nil {
+				return nil, errors.Wrap(err, "iterating through bucket objects")
+			}
+			if len(attrs.Metadata) == 0 {
+				fmt.Printf("WARNING: no paths defined for object %s\n", attrs.Name)
+				continue
+			}
+			var paths map[string]int64
+			if err = json.Unmarshal([]byte(attrs.Metadata["paths"]), &paths); err != nil {
+				fmt.Printf("WARNING: unmarshaling paths in object %s: %s\n", attrs.Name, err)
+				continue
+			}
+			for path, unixtime := range paths {
+				f.addPath(attrs.Name, path, unixtime, uint64(attrs.Size))
+			}
+		}
+	}
+
+	// Build filesystem by parsing JSON list output.
+
+	var r io.Reader = os.Stdin
+	if fromfile != "-" {
+		inp, err := os.Open(fromfile)
+		if err != nil {
+			return nil, errors.Wrapf(err, "opening %s", fromfile)
+		}
+		defer inp.Close()
+		r = inp
+	}
+
+	dec := json.NewDecoder(r)
+	for dec.More() {
+		var l listType
+		if err := dec.Decode(&l); err != nil {
+			return nil, errors.Wrap(err, "JSON-decoding prescan input")
+		}
+		for path, timestamp := range l.Paths {
+			if err := f.addPath(l.Hash, path, timestamp.Unix(), uint64(l.Size)); err != nil {
+				return nil, errors.Wrap(err, "building prescan tree")
+			}
+		}
+	}
+
+	return f, nil
+}
+
+func (f *FS) addPath(hash, path string, unixtime int64, size uint64) error {
+	parent, basename, err := f.root.findParent(path, true)
+	if err != nil {
+		return err
+	}
+	node := &FSNode{
+		fs:        f,
+		inode:     f.allocateInode(),
+		parent:    parent,
+		hash:      hash,
+		timestamp: time.Unix(unixtime, 0),
+		size:      size,
+	}
+	parent.children[basename] = node
+	return nil
 }
 
 func (f *FS) allocateInode() uint64 {
@@ -74,6 +147,10 @@ func (f *FS) allocateInode() uint64 {
 	result := f.nextInode
 	f.nextInode++
 	return result
+}
+
+func (f *FS) Root() (fs.Node, error) {
+	return f.root, nil
 }
 
 var (
@@ -95,56 +172,6 @@ type FSNode struct {
 	hash      string // hash != "" means this is a file
 	timestamp time.Time
 	size      uint64
-}
-
-func (f *FS) build(ctx context.Context) error {
-	var (
-		query = &storage.Query{Projection: storage.ProjectionNoACL}
-		it    = f.bucket.Objects(ctx, query)
-	)
-
-	for {
-		attrs, err := it.Next()
-		if errors.Is(err, iterator.Done) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if len(attrs.Metadata) == 0 {
-			fmt.Printf("WARNING: no paths defined for object %s\n", attrs.Name)
-			continue
-		}
-		var paths map[string]int64
-		if err = json.Unmarshal([]byte(attrs.Metadata["paths"]), &paths); err != nil {
-			fmt.Printf("WARNING: unmarshaling paths in object %s: %s\n", attrs.Name, err)
-			continue
-		}
-		for path, unixtime := range paths {
-			f.addPath(attrs.Name, path, unixtime, uint64(attrs.Size))
-		}
-	}
-}
-
-func (f *FS) addPath(hash, path string, unixtime int64, size uint64) error {
-	parent, basename, err := f.root.findParent(path, true)
-	if err != nil {
-		return err
-	}
-	node := &FSNode{
-		fs:        f,
-		inode:     f.allocateInode(),
-		parent:    parent,
-		hash:      hash,
-		timestamp: time.Unix(unixtime, 0),
-		size:      size,
-	}
-	parent.children[basename] = node
-	return nil
-}
-
-func (f *FS) Root() (fs.Node, error) {
-	return f.root, nil
 }
 
 func (n *FSNode) Attr(ctx context.Context, a *fuse.Attr) error {
@@ -212,10 +239,16 @@ func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 			return err
 		}
 	}
+
 	buf := make([]byte, req.Size)
 	nbytes, err := r.Read(buf)
 	resp.Data = buf[:nbytes]
-	return err // xxx filter out io.EOF?
+
+	if errors.Is(err, io.EOF) {
+		// Not sure this is right.
+		err = nil
+	}
+	return err
 }
 
 func (n *FSNode) ReadAll(ctx context.Context) ([]byte, error) {

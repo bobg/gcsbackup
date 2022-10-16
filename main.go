@@ -67,6 +67,7 @@ func (c maincmd) Subcmds() subcmd.Map {
 		"list", c.doList, "list bucket objects", nil,
 		"fs", c.doFS, "serve a FUSE filesystem", subcmd.Params(
 			"-name", subcmd.String, c.bucketname, "file system name",
+			"-list", subcmd.String, "", "build file system from list output; use - to read from stdin",
 			"mount", subcmd.String, "", "mount point",
 		),
 	)
