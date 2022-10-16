@@ -15,6 +15,7 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"cloud.google.com/go/storage"
+	"github.com/bobg/gcsobj"
 	"github.com/pkg/errors"
 	"google.golang.org/api/iterator"
 )
@@ -49,6 +50,8 @@ type FS struct {
 	nextInode uint64
 }
 
+var _ fs.FS = &FS{}
+
 func (f *FS) allocateInode() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -57,6 +60,13 @@ func (f *FS) allocateInode() uint64 {
 	f.nextInode++
 	return result
 }
+
+var (
+	_ fs.Node               = &FSNode{}
+	_ fs.HandleReadAller    = &FSNode{}
+	_ fs.HandleReadDirAller = &FSNode{}
+	_ fs.HandleReader       = &FSNode{}
+)
 
 type FSNode struct {
 	fs     *FS
@@ -147,6 +157,10 @@ func (n *FSNode) Lookup(_ context.Context, name string) (fs.Node, error) {
 }
 
 func (n *FSNode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
+	return n.dirents(), nil
+}
+
+func (n *FSNode) dirents() []fuse.Dirent {
 	var result []fuse.Dirent
 	for name, child := range n.children {
 		typ := fuse.DT_File
@@ -159,7 +173,38 @@ func (n *FSNode) ReadDirAll(ctx context.Context) ([]fuse.Dirent, error) {
 			Name:  name,
 		})
 	}
-	return result, nil
+	return result
+}
+
+func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+	if req.Dir {
+		var (
+			dirents = n.dirents()
+			result  []byte
+		)
+		for _, dirent := range dirents {
+			result = fuse.AppendDirent(result, dirent)
+		}
+		resp.Data = result
+		return nil
+	}
+
+	obj := n.fs.bucket.Object(n.hash)
+	r, err := gcsobj.NewReader(ctx, obj)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	if req.Offset > 0 {
+		if _, err = r.Seek(req.Offset, io.SeekStart); err != nil {
+			return err
+		}
+	}
+	buf := make([]byte, req.Size)
+	nbytes, err := r.Read(buf)
+	resp.Data = buf[:nbytes]
+	return err // xxx filter out io.EOF?
 }
 
 func (n *FSNode) ReadAll(ctx context.Context) ([]byte, error) {

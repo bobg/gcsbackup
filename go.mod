@@ -8,6 +8,7 @@ require (
 	cloud.google.com/go/iam v0.5.0 // indirect
 	cloud.google.com/go/storage v1.27.0
 	github.com/bobg/atime/v2 v2.2.1
+	github.com/bobg/gcsobj v0.1.2 // indirect
 	github.com/bobg/subcmd/v2 v2.0.1
 	github.com/cenkalti/backoff/v4 v4.1.3
 	github.com/djherbis/atime v1.1.0 // indirect
