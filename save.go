@@ -21,7 +21,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-func (c maincmd) doSave(ctx context.Context, excludeFrom string, prescan bool, args []string) error {
+func (c maincmd) doSave(ctx context.Context, excludeFrom string, prescan bool, prescanFile string, args []string) error {
 	var excludePatterns []*regexp.Regexp
 	if excludeFrom != "" {
 		f, err := os.Open(excludeFrom)
@@ -48,13 +48,42 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, prescan bool, a
 	bkoff = backoff.WithContext(bkoff, ctx)
 
 	var tree *FSNode
-	if prescan {
+	if prescanFile != "" {
+
+		var r io.Reader = os.Stdin
+		if prescanFile != "-" {
+			inp, err := os.Open(prescanFile)
+			if err != nil {
+				return errors.Wrapf(err, "opening %s", prescanFile)
+			}
+			defer inp.Close()
+			r = inp
+		}
+
+		dec := json.NewDecoder(r)
+		f := newFS(c.bucket)
+		for dec.More() {
+			var l listType
+			if err := dec.Decode(&l); err != nil {
+				return errors.Wrap(err, "JSON-decoding prescan input")
+			}
+			for path, timestamp := range l.Paths {
+				if err := f.addPath(l.Hash, path, timestamp.Unix(), uint64(l.Size)); err != nil {
+					return errors.Wrap(err, "building prescan tree")
+				}
+			}
+		}
+		tree = f.root
+
+	} else if prescan {
+
 		log.Print("Prescanning, please wait")
 		f := newFS(c.bucket)
 		if err := f.build(ctx); err != nil {
-			return errors.Wrapf(err, "in prescan")
+			return errors.Wrapf(err, "building prescan tree")
 		}
 		tree = f.root
+
 	}
 
 	for _, root := range args {
