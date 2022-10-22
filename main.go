@@ -61,8 +61,7 @@ func (c maincmd) Subcmds() subcmd.Map {
 	return subcmd.Commands(
 		"save", c.doSave, "save files to GCS", subcmd.Params(
 			"-exclude-from", subcmd.String, "", "file of exclude patterns (unanchored regexes)",
-			"-prescan", subcmd.Bool, false, "prescan the GCS bucket for existing backup objects",
-			"-prescan-file", subcmd.String, "", "prescan from a file of list output; use - to read from stdin",
+			"-list", subcmd.String, "", "prescan from a file of list output; use - to read from stdin",
 		),
 		"list", c.doList, "list bucket objects", nil,
 		"fs", c.doFS, "serve a FUSE filesystem", subcmd.Params(

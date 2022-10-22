@@ -21,7 +21,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-func (c maincmd) doSave(ctx context.Context, excludeFrom string, prescan bool, prescanFile string, args []string) error {
+func (c maincmd) doSave(ctx context.Context, excludeFrom string, listfile string, args []string) error {
 	var excludePatterns []*regexp.Regexp
 	if excludeFrom != "" {
 		f, err := os.Open(excludeFrom)
@@ -47,13 +47,9 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, prescan bool, p
 	bkoff := backoff.WithMaxRetries(expBkoff, 3)
 	bkoff = backoff.WithContext(bkoff, ctx)
 
-	var tree *FSNode
-	if prescan || prescanFile != "" {
-		f, err := newFS(ctx, c.bucket, prescanFile)
-		if err != nil {
-			return errors.Wrap(err, "in prescan")
-		}
-		tree = f.root
+	f, err := newFS(ctx, c.bucket, listfile)
+	if err != nil {
+		return errors.Wrap(err, "in prescan")
 	}
 
 	for _, root := range args {
@@ -79,15 +75,12 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, prescan bool, p
 				}
 			}
 
-			var node *FSNode
-			if tree != nil {
-				node, err = tree.findNode(path, false)
-				if err != nil {
-					// Ignore errors.
-					node = nil
-				} else if node.hash == "" {
-					node = nil
-				}
+			node, err := f.root.findNode(path, false)
+			if err != nil {
+				// Ignore errors.
+				node = nil
+			} else if node.hash == "" {
+				node = nil
 			}
 
 			if node != nil {
