@@ -2,6 +2,10 @@
 
 This is gcsbackup, a command for backing up files to a Google Cloud Storage bucket.
 
+**IMPORTANT.** Google Cloud Storage operations cost money.
+Be sure you understand the costs you will incur by using this software.
+The author is not responsible for GCS expenses you did not expect.
+
 ## Installation
 
 ```sh
