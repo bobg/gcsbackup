@@ -129,7 +129,7 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, listfile string
 					"paths": string(j),
 				}
 
-				log.Printf("uploading %s, %d bytes, hash %s", path, info.Size(), name)
+				log.Printf("Uploading %s, %d bytes, hash %s", path, info.Size(), name)
 
 				err = withRetries(bkoff, func() error {
 					var w io.WriteCloser = obj.NewWriter(ctx)
