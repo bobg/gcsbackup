@@ -174,6 +174,10 @@ type FSNode struct {
 	size      uint64
 }
 
+func (n *FSNode) isDir() bool {
+	return n.hash == ""
+}
+
 func (n *FSNode) Attr(ctx context.Context, a *fuse.Attr) error {
 	a.Inode = n.inode
 	a.Size = n.size
