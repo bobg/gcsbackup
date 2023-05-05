@@ -19,16 +19,15 @@ import (
 )
 
 type kodi struct {
-	bucket                  *storage.BucketHandle
-	dir, username, password string
-	f                       *FS
+	bucket             *storage.BucketHandle
+	username, password string
+	node               *FSNode
 }
 
 func (c maincmd) doKodi(ctx context.Context, dir, listen, username, password, listfile, certfile, keyfile string, _ []string) error {
 	return ctrlc.Run(ctx, func(ctx context.Context) error {
 		k := &kodi{
 			bucket:   c.bucket,
-			dir:      dir,
 			username: username,
 			password: password,
 		}
@@ -38,7 +37,12 @@ func (c maincmd) doKodi(ctx context.Context, dir, listen, username, password, li
 		if err != nil {
 			return errors.Wrap(err, "building filesystem")
 		}
-		k.f = f
+		node, err := f.root.findNode(dir, false)
+		if err != nil {
+			return errors.Wrapf(err, "finding %s", dir)
+		}
+
+		k.node = node
 
 		s := &http.Server{
 			Addr:    listen,
@@ -72,10 +76,10 @@ func (k *kodi) handle(w http.ResponseWriter, req *http.Request) error {
 
 	path := strings.Trim(req.URL.Path, "/")
 	if path == "" {
-		return k.handleDir(ctx, w, k.f.root)
+		return k.handleDir(ctx, w, k.node)
 	}
 
-	node, err := k.f.root.findNode(path, false)
+	node, err := k.node.findNode(path, false)
 	if errors.Is(err, fs.ErrNotExist) {
 		return mid.CodeErr{C: http.StatusNotFound}
 	}
