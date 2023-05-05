@@ -75,6 +75,8 @@ func (c maincmd) Subcmds() subcmd.Map {
 			"-username", subcmd.String, "", "HTTP Basic Auth username",
 			"-password", subcmd.String, "", "HTTP Basic Auth password", // TODO: move this to an env var
 			"-list", subcmd.String, "", "build file system from list output; use - to read from stdin",
+			"-cert", subcmd.String, "", "path to cert file",
+			"-key", subcmd.String, "", "path to key file",
 		),
 	)
 }
