@@ -25,8 +25,8 @@ type kodi struct {
 	node               *FSNode
 }
 
-func (c maincmd) doKodi(ctx context.Context, dir, listen, username, password, listfile, certfile, keyfile string, _ []string) error {
-	return ctrlc.Run(ctx, func(ctx context.Context) error {
+func (c maincmd) doKodi(outerCtx context.Context, dir, listen, username, password, listfile, certfile, keyfile string, _ []string) error {
+	return ctrlc.Run(outerCtx, func(ctx context.Context) error {
 		k := &kodi{
 			bucket:   c.bucket,
 			username: username,
@@ -52,14 +52,18 @@ func (c maincmd) doKodi(ctx context.Context, dir, listen, username, password, li
 		log.Printf("Listening on %s", listen)
 
 		if certfile != "" && keyfile != "" {
-			err = s.ListenAndServeTLS(certfile, keyfile)
+			go s.ListenAndServeTLS(certfile, keyfile)
 		} else {
-			err = s.ListenAndServe()
+			go s.ListenAndServe()
 		}
+
+		<-ctx.Done()
+		err = s.Shutdown(outerCtx)
+
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
-		return errors.Wrap(err, "in ListenAndServe")
+		return err
 	})
 }
 
