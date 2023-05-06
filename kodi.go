@@ -74,6 +74,8 @@ func (k *kodi) handle(w http.ResponseWriter, req *http.Request) error {
 
 	ctx := req.Context()
 
+	log.Printf("Handling %s", req.URL.Path)
+
 	path := strings.Trim(req.URL.Path, "/")
 	if path == "" {
 		return k.handleDir(ctx, w, k.node)
