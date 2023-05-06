@@ -6,7 +6,7 @@ require (
 	bazil.org/fuse v0.0.0-20230120002735-62a210ff1fd5
 	cloud.google.com/go/storage v1.27.0
 	github.com/bobg/atime/v2 v2.2.1
-	github.com/bobg/ctrlc v0.0.0-20230409165555-645b91f50971
+	github.com/bobg/ctrlc v0.0.0-20230506161000-af889a8b0b3b
 	github.com/bobg/gcsobj v0.1.2
 	github.com/bobg/go-generics/v2 v2.1.1
 	github.com/bobg/mid v1.7.1
