@@ -60,8 +60,10 @@ func (c maincmd) doKodi(outerCtx context.Context, dir, listen, username, passwor
 		}
 
 		<-ctx.Done()
-		err = s.Shutdown(outerCtx)
 
+		log.Print("Context canceled, shutting down server")
+
+		err = s.Shutdown(outerCtx)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
