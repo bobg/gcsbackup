@@ -69,5 +69,14 @@ func (c maincmd) Subcmds() subcmd.Map {
 			"-list", subcmd.String, "", "build file system from list output; use - to read from stdin",
 			"mount", subcmd.String, "", "mount point",
 		),
+		"kodi", c.doKodi, "serve a gcsbackup file tree to Kodi", subcmd.Params(
+			"-dir", subcmd.String, "", "directory to serve",
+			"-listen", subcmd.String, ":1549", "listen address",
+			"-username", subcmd.String, "", "HTTP Basic Auth username",
+			"-password", subcmd.String, "", "HTTP Basic Auth password", // TODO: move this to an env var
+			"-list", subcmd.String, "", "build file system from list output; use - to read from stdin",
+			"-cert", subcmd.String, "", "path to cert file",
+			"-key", subcmd.String, "", "path to key file",
+		),
 	)
 }
