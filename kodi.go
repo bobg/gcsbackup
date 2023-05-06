@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -32,7 +33,6 @@ func (c maincmd) doKodi(ctx context.Context, dir, listen, username, password, li
 			password: password,
 		}
 
-		log.Print("Building file system, please wait")
 		f, err := newFS(ctx, c.bucket, listfile)
 		if err != nil {
 			return errors.Wrap(err, "building filesystem")
@@ -111,6 +111,7 @@ func (k *kodi) handleDir(ctx context.Context, w http.ResponseWriter, node *FSNod
 	var items []template.URL
 
 	keys := maps.Keys(node.children)
+	sort.Strings(keys)
 	for _, key := range keys {
 		child := node.children[key]
 		if child.isDir() {
