@@ -70,6 +70,28 @@ Use `-list LISTFILE` to specify the output of an earlier `gcsbackup list` run on
 This is used to know what files are present in the bucket without having to query GCS,
 which can significantly speed things up and reduce costs.
 
+### Serving video files to Kodi
+
+```sh
+gcsbackup [-creds CREDSFILE] -bucket BUCKET kodi [-dir DIR] [-list LISTFILE] [-listen ADDR] [-username USERNAME] [-password PASSWORD] [-cert CERTFILE] [-key KEYFILE]
+```
+
+Serves the contents of a gcsbackup bucket as files to a [Kodi](https://kodi.tv/) media-playing app.
+See also [kodigcs](https://github.com/bobg/kodigcs)
+(which uses a different bucket layout).
+
+Use `-dir` to specify a subtree of files to serve. By default the whole bucket is served.
+
+Use `-list` to specify the output of an earlier `gcsbackup list` run on the same bucket.
+This is used to know what files are present in the bucket without having to query GCS,
+which can significantly speed things up and reduce costs.
+
+Use `-listen` to specify a listen address for the server. The default is `:1549`.
+
+Use `-username` and `-password` to require HTTP basic auth when making server requests.
+
+Use `-cert` and `-key` for setting up TLS.
+
 ## Credentials
 
 A credentials file is required to authorize `gcsbackup` to perform its operations in GCS.
