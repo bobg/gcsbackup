@@ -3,7 +3,6 @@ module github.com/bobg/gcsbackup
 go 1.18
 
 require (
-	bazil.org/fuse v0.0.0-20230120002735-62a210ff1fd5
 	cloud.google.com/go/storage v1.33.0
 	github.com/bobg/atime/v2 v2.2.1
 	github.com/bobg/ctrlc v0.0.0-20230506161000-af889a8b0b3b
@@ -13,6 +12,7 @@ require (
 	github.com/bobg/subcmd/v2 v2.2.1
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/pkg/errors v0.9.1
+	github.com/seaweedfs/fuse v1.2.3
 	golang.org/x/time v0.3.0
 	google.golang.org/api v0.148.0
 )

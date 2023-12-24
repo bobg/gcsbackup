@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"bazil.org/fuse"
-	"bazil.org/fuse/fs"
 	"cloud.google.com/go/storage"
 	"github.com/bobg/gcsobj"
 	"github.com/pkg/errors"
+	fuse "github.com/seaweedfs/fuse"
+	fs "github.com/seaweedfs/fuse/fs"
 	"google.golang.org/api/iterator"
 )
 
