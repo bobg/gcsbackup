@@ -47,7 +47,7 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, listfile string
 	bkoff := backoff.WithMaxRetries(expBkoff, 3)
 	bkoff = backoff.WithContext(bkoff, ctx)
 
-	f, err := newFS(ctx, c.bucket, listfile)
+	f, err := newFS(ctx, c.bucket, listfile, time.Time{})
 	if err != nil {
 		return errors.Wrap(err, "in prescan")
 	}

@@ -15,16 +15,26 @@ import (
 	"bazil.org/fuse"
 	"bazil.org/fuse/fs"
 	"cloud.google.com/go/storage"
+	"github.com/araddon/dateparse"
 	"github.com/bobg/gcsobj"
 	"github.com/pkg/errors"
 	"google.golang.org/api/iterator"
 )
 
-func (c maincmd) doFS(ctx context.Context, name, listfile, mountpoint string, _ []string) error {
+func (c maincmd) doFS(ctx context.Context, name, listfile, mountpoint, atstr string, _ []string) error {
 	start := time.Now()
 
+	var at time.Time
+	if atstr != "" {
+		var err error
+		at, err = dateparse.ParseLocal(atstr)
+		if err != nil {
+			return errors.Wrapf(err, "parsing -at %s", atstr)
+		}
+	}
+
 	log.Print("Building file system, please wait")
-	f, err := newFS(ctx, c.bucket, listfile)
+	f, err := newFS(ctx, c.bucket, listfile, at)
 	if err != nil {
 		return errors.Wrap(err, "building filesystem")
 	}
@@ -54,7 +64,7 @@ type FS struct {
 
 var _ fs.FS = &FS{}
 
-func newFS(ctx context.Context, bucket *storage.BucketHandle, fromfile string) (*FS, error) {
+func newFS(ctx context.Context, bucket *storage.BucketHandle, fromfile string, at time.Time) (*FS, error) {
 	f := &FS{
 		bucket:    bucket,
 		nextInode: 2,
@@ -90,7 +100,7 @@ func newFS(ctx context.Context, bucket *storage.BucketHandle, fromfile string) (
 				continue
 			}
 			for path, unixtime := range paths {
-				f.addPath(attrs.Name, path, unixtime, uint64(attrs.Size))
+				f.addPath(attrs.Name, path, unixtime, uint64(attrs.Size), at)
 			}
 		}
 	}
@@ -114,7 +124,7 @@ func newFS(ctx context.Context, bucket *storage.BucketHandle, fromfile string) (
 			return nil, errors.Wrap(err, "JSON-decoding prescan input")
 		}
 		for path, timestamp := range l.Paths {
-			if err := f.addPath(l.Hash, path, timestamp.Unix(), uint64(l.Size)); err != nil {
+			if err := f.addPath(l.Hash, path, timestamp.Unix(), uint64(l.Size), at); err != nil {
 				return nil, errors.Wrap(err, "building prescan tree")
 			}
 		}
@@ -123,7 +133,12 @@ func newFS(ctx context.Context, bucket *storage.BucketHandle, fromfile string) (
 	return f, nil
 }
 
-func (f *FS) addPath(hash, path string, unixtime int64, size uint64) error {
+func (f *FS) addPath(hash, path string, unixtime int64, size uint64, at time.Time) error {
+	timestamp := time.Unix(unixtime, 0)
+	if !at.IsZero() && timestamp.After(at) {
+		return nil
+	}
+
 	parent, basename, err := f.root.findParent(path, true)
 	if err != nil {
 		return err
@@ -133,7 +148,7 @@ func (f *FS) addPath(hash, path string, unixtime int64, size uint64) error {
 		inode:     f.allocateInode(),
 		parent:    parent,
 		hash:      hash,
-		timestamp: time.Unix(unixtime, 0),
+		timestamp: timestamp,
 		size:      size,
 	}
 	parent.children[basename] = node

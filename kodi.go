@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/araddon/dateparse"
 	"github.com/bobg/ctrlc"
 	"github.com/bobg/gcsobj"
 	"github.com/bobg/go-generics/v2/maps"
@@ -25,7 +26,7 @@ type kodi struct {
 	node               *FSNode
 }
 
-func (c maincmd) doKodi(outerCtx context.Context, dir, listen, username, password, listfile, certfile, keyfile string, _ []string) error {
+func (c maincmd) doKodi(outerCtx context.Context, dir, listen, username, password, listfile, certfile, keyfile, atstr string, _ []string) error {
 	return ctrlc.Run(outerCtx, func(ctx context.Context) error {
 		k := &kodi{
 			bucket:   c.bucket,
@@ -33,9 +34,18 @@ func (c maincmd) doKodi(outerCtx context.Context, dir, listen, username, passwor
 			password: password,
 		}
 
+		var at time.Time
+		if atstr != "" {
+			var err error
+			at, err = dateparse.ParseLocal(atstr)
+			if err != nil {
+				return errors.Wrapf(err, "parsing -at %s", atstr)
+			}
+		}
+
 		log.Print("Building file system, please wait")
 
-		f, err := newFS(ctx, c.bucket, listfile)
+		f, err := newFS(ctx, c.bucket, listfile, at)
 		if err != nil {
 			return errors.Wrap(err, "building filesystem")
 		}
