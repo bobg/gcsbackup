@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -22,7 +23,10 @@ import (
 )
 
 func (c maincmd) doSave(ctx context.Context, excludeFrom string, listfile string, args []string) error {
-	var excludePatterns []*regexp.Regexp
+	var (
+		excludeFilePatterns []*regexp.Regexp
+		excludeDirPatterns  []*regexp.Regexp
+	)
 	if excludeFrom != "" {
 		f, err := os.Open(excludeFrom)
 		if err != nil {
@@ -31,11 +35,26 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, listfile string
 		defer f.Close()
 		sc := bufio.NewScanner(f)
 		for sc.Scan() {
-			regex, err := regexp.Compile(sc.Text())
+			var (
+				line  = sc.Text()
+				isDir bool
+			)
+			if strings.HasSuffix(line, "/") {
+				isDir = true
+				line = line[:len(line)-1]
+				line += "$"
+			}
+
+			regex, err := regexp.Compile(line)
 			if err != nil {
 				log.Fatalf("Compiling exclude pattern %s: %s", sc.Text(), err)
 			}
-			excludePatterns = append(excludePatterns, regex)
+
+			if isDir {
+				excludeDirPatterns = append(excludeDirPatterns, regex)
+			} else {
+				excludeFilePatterns = append(excludeFilePatterns, regex)
+			}
 		}
 		if err := sc.Err(); err != nil {
 			log.Fatal(err)
@@ -58,6 +77,12 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, listfile string
 				return err
 			}
 			if info.IsDir() {
+				for _, regex := range excludeDirPatterns {
+					if regex.MatchString(path) {
+						log.Printf("Skipping excluded dir %s", path)
+						return filepath.SkipDir
+					}
+				}
 				return nil
 			}
 			if (info.Mode() & fs.ModeSymlink) == fs.ModeSymlink {
@@ -68,7 +93,7 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, listfile string
 				log.Printf("Skipping empty file %s", path)
 				return nil
 			}
-			for _, regex := range excludePatterns {
+			for _, regex := range excludeFilePatterns {
 				if regex.MatchString(path) {
 					log.Printf("Skipping excluded file %s", path)
 					return nil
@@ -170,7 +195,7 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, listfile string
 			}
 
 			if _, ok := paths[path]; ok {
-				log.Printf("%s already present (hash %s)", path, name)
+				log.Printf("Already present: %s (hash %s)", path, name)
 				return nil
 			}
 
@@ -178,7 +203,7 @@ func (c maincmd) doSave(ctx context.Context, excludeFrom string, listfile string
 			for k := range paths {
 				oldpaths = append(oldpaths, k)
 			}
-			log.Printf("%s already present as %v (hash %s), adding new path", path, oldpaths, name)
+			log.Printf("New path for %s (hash %s), already present as %v", path, name, oldpaths)
 
 			paths[path] = time.Now().Unix()
 			j, err := json.Marshal(paths)
