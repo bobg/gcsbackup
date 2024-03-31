@@ -15,9 +15,13 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/bobg/gcsobj"
 	"github.com/pkg/errors"
-	fuse "github.com/seaweedfs/fuse"
-	fs "github.com/seaweedfs/fuse/fs"
 	"google.golang.org/api/iterator"
+
+	// These used to be bazil.org/fuse and bazil.org/fuse/fs,
+	// but that module does not work on MacOS.
+	// (Plus it has an unstable version number.)
+	"github.com/seaweedfs/fuse"
+	"github.com/seaweedfs/fuse/fs"
 )
 
 func (c maincmd) doFS(ctx context.Context, name, listfile, mountpoint string, _ []string) error {
