@@ -14,7 +14,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/bobg/gcsobj"
-	"github.com/pkg/errors"
+	"github.com/bobg/errors"
 	"google.golang.org/api/iterator"
 
 	// These used to be bazil.org/fuse and bazil.org/fuse/fs,

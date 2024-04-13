@@ -13,10 +13,10 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/bobg/ctrlc"
+	"github.com/bobg/errors"
 	"github.com/bobg/gcsobj"
 	"github.com/bobg/go-generics/v2/maps"
 	"github.com/bobg/mid"
-	"github.com/pkg/errors"
 )
 
 type kodi struct {
