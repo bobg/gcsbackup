@@ -36,8 +36,9 @@ func (c maincmd) doFS(ctx context.Context, name, listfile, mountpoint string, _ 
 	conn, err := fuse.Mount(
 		mountpoint,
 		fuse.FSName(name),
-		fuse.Subtype("gcsbackup"),
+		fuse.NoBrowse(),
 		fuse.ReadOnly(),
+		fuse.Subtype("gcsbackup"),
 	)
 	if err != nil {
 		return errors.Wrapf(err, "mounting filesystem")
@@ -222,7 +223,7 @@ func (n *FSNode) dirents() []fuse.Dirent {
 	return result
 }
 
-func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) (err error) {
 	if req.Dir {
 		var (
 			dirents = n.dirents()
@@ -234,6 +235,15 @@ func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 		resp.Data = result
 		return nil
 	}
+
+	start := time.Now()
+	defer func() {
+		if err != nil {
+			log.Printf("Read %s: error: %s", n.hash, err)
+		} else {
+			log.Printf("Read %s: %d bytes in %s", n.hash, len(resp.Data), time.Since(start))
+		}
+	}()
 
 	obj := n.fs.bucket.Object(n.hash)
 	r, err := gcsobj.NewReader(ctx, obj)
@@ -259,7 +269,25 @@ func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 	return err
 }
 
-func (n *FSNode) ReadAll(ctx context.Context) ([]byte, error) {
+const (
+	readAllLarge = 1 << 26
+	readAllChunk = 1 << 24
+)
+
+func (n *FSNode) ReadAll(ctx context.Context) (res []byte, err error) {
+	start := time.Now()
+	defer func() {
+		if err != nil {
+			log.Printf("ReadAll %s: error: %s", n.hash, err)
+		} else {
+			log.Printf("ReadAll %s: %d bytes in %s", n.hash, len(res), time.Since(start))
+		}
+	}()
+
+	if n.size > readAllLarge {
+		return n.readAllLarge(ctx)
+	}
+
 	obj := n.fs.bucket.Object(n.hash)
 	r, err := obj.NewReader(ctx)
 	if err != nil {
@@ -267,6 +295,35 @@ func (n *FSNode) ReadAll(ctx context.Context) ([]byte, error) {
 	}
 	defer r.Close()
 	return io.ReadAll(r)
+}
+
+func (n *FSNode) readAllLarge(ctx context.Context) ([]byte, error) {
+	obj := n.fs.bucket.Object(n.hash)
+	r, err := gcsobj.NewReader(ctx, obj)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	var (
+		buf    = make([]byte, n.size)
+		offset int
+	)
+
+	for {
+		lim := offset + readAllChunk
+		if lim > len(buf) {
+			lim = len(buf)
+		}
+		n, err := r.Read(buf[offset:lim])
+		offset += n
+		if err != nil || offset == len(buf) {
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+			return buf[:offset], err
+		}
+	}
 }
 
 func (n *FSNode) findNode(name string, create bool) (*FSNode, error) {
