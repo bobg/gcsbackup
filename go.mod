@@ -15,6 +15,7 @@ require (
 	github.com/seaweedfs/fuse v1.2.3
 	golang.org/x/time v0.5.0
 	google.golang.org/api v0.172.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

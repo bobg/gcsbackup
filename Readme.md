@@ -56,7 +56,7 @@ See [Credentials](#credentials) below.
 ### Mounting a FUSE filesystem
 
 ```sh
-gcsbackup [-creds CREDSFILE] -bucket BUCKET fs [-name NAME] [-list LISTFILE] MOUNTPOINT
+gcsbackup [-creds CREDSFILE] -bucket BUCKET fs [-name NAME] [-list LISTFILE] [-conf CONFFILE] MOUNTPOINT
 ```
 
 Mounts a FUSE filesystem at MOUNTPOINT,
@@ -69,6 +69,14 @@ The default is the name of the bucket.
 Use `-list LISTFILE` to specify the output of an earlier `gcsbackup list` run on the same bucket.
 This is used to know what files are present in the bucket without having to query GCS,
 which can significantly speed things up and reduce costs.
+
+Use `-conf CONFFILE` to override defaults for some config settings.
+The named config file is in YAML format.
+At this writing it defines these settings:
+
+ - `large` is the file-size threshold above which reads are done in chunks rather than a single call. Disable this behavior by setting this to 0. The default is 48MB.
+ - `chunk` is the size of a chunk when reading “large” files. The default is 16MB.
+ - `browse` permits the Mac Finder to automatically “browse” the filesystem. The default is false (to save bandwidth and cost).
 
 ### Serving video files to Kodi
 
