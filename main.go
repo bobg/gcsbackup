@@ -67,6 +67,7 @@ func (c maincmd) Subcmds() subcmd.Map {
 		"fs", c.doFS, "serve a FUSE filesystem", subcmd.Params(
 			"-name", subcmd.String, c.bucketname, "file system name",
 			"-list", subcmd.String, "", "build file system from list output; use - to read from stdin",
+			"-conf", subcmd.String, "", "path to config file",
 			"mount", subcmd.String, "", "mount point",
 		),
 		"kodi", c.doKodi, "serve a gcsbackup file tree to Kodi", subcmd.Params(

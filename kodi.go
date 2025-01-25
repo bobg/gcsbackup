@@ -35,7 +35,7 @@ func (c maincmd) doKodi(outerCtx context.Context, dir, listen, username, passwor
 
 		log.Print("Building file system, please wait")
 
-		f, err := newFS(ctx, c.bucket, listfile)
+		f, err := newFS(ctx, c.bucket, listfile, "")
 		if err != nil {
 			return errors.Wrap(err, "building filesystem")
 		}

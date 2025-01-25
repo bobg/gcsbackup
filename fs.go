@@ -16,6 +16,7 @@ import (
 	"github.com/bobg/gcsobj"
 	"github.com/pkg/errors"
 	"google.golang.org/api/iterator"
+	"gopkg.in/yaml.v3"
 
 	// These used to be bazil.org/fuse and bazil.org/fuse/fs,
 	// but that module does not work on MacOS.
@@ -24,21 +25,25 @@ import (
 	"github.com/seaweedfs/fuse/fs"
 )
 
-func (c maincmd) doFS(ctx context.Context, name, listfile, mountpoint string, _ []string) error {
+func (c maincmd) doFS(ctx context.Context, name, listfile, mountpoint, confFile string, _ []string) error {
 	start := time.Now()
 
 	log.Print("Building file system, please wait")
-	f, err := newFS(ctx, c.bucket, listfile)
+	f, err := newFS(ctx, c.bucket, listfile, confFile)
 	if err != nil {
 		return errors.Wrap(err, "building filesystem")
 	}
 
-	conn, err := fuse.Mount(
-		mountpoint,
+	opts := []fuse.MountOption{
 		fuse.FSName(name),
-		fuse.Subtype("gcsbackup"),
 		fuse.ReadOnly(),
-	)
+		fuse.Subtype("gcsbackup"),
+	}
+	if !f.conf.Browse {
+		opts = append(opts, fuse.NoBrowse())
+	}
+
+	conn, err := fuse.Mount(mountpoint, opts...)
 	if err != nil {
 		return errors.Wrapf(err, "mounting filesystem")
 	}
@@ -52,21 +57,56 @@ type FS struct {
 	bucket *storage.BucketHandle
 	root   *FSNode
 
+	conf fsConf
+
 	mu        sync.Mutex // protects nextInode
 	nextInode uint64
 }
 
+type fsConf struct {
+	Large  uint64 `yaml:"large"`
+	Chunk  uint64 `yaml:"chunk"`
+	Browse bool   `yaml:"browse"`
+}
+
+const (
+	defaultLargeRead = 48000000
+	defaultChunkRead = 16000000
+)
+
 var _ fs.FS = &FS{}
 
-func newFS(ctx context.Context, bucket *storage.BucketHandle, fromfile string) (*FS, error) {
+func newFS(ctx context.Context, bucket *storage.BucketHandle, fromfile, confFile string) (*FS, error) {
 	f := &FS{
 		bucket:    bucket,
 		nextInode: 2,
+
+		conf: fsConf{
+			Large: defaultLargeRead,
+			Chunk: defaultChunkRead,
+		},
 	}
 	f.root = &FSNode{
 		fs:       f,
 		inode:    1,
 		children: make(map[string]*FSNode),
+	}
+
+	if confFile != "" {
+		conf, err := os.Open(confFile)
+		if err != nil {
+			return nil, errors.Wrapf(err, "opening %s", confFile)
+		}
+		defer conf.Close()
+
+		dec := yaml.NewDecoder(conf)
+		if err := dec.Decode(&f.conf); err != nil {
+			return nil, errors.Wrapf(err, "decoding %s", confFile)
+		}
+
+		if f.conf.Chunk > f.conf.Large {
+			return nil, fmt.Errorf("chunk size %d is larger than large size %d", f.conf.Chunk, f.conf.Large)
+		}
 	}
 
 	if fromfile == "" {
@@ -222,7 +262,7 @@ func (n *FSNode) dirents() []fuse.Dirent {
 	return result
 }
 
-func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) error {
+func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.ReadResponse) (err error) {
 	if req.Dir {
 		var (
 			dirents = n.dirents()
@@ -234,6 +274,15 @@ func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 		resp.Data = result
 		return nil
 	}
+
+	start := time.Now()
+	defer func() {
+		if err != nil {
+			log.Printf("Read %s: error: %s", n.hash, err)
+		} else {
+			log.Printf("Read %s: %d bytes in %s", n.hash, len(resp.Data), time.Since(start))
+		}
+	}()
 
 	obj := n.fs.bucket.Object(n.hash)
 	r, err := gcsobj.NewReader(ctx, obj)
@@ -259,7 +308,20 @@ func (n *FSNode) Read(ctx context.Context, req *fuse.ReadRequest, resp *fuse.Rea
 	return err
 }
 
-func (n *FSNode) ReadAll(ctx context.Context) ([]byte, error) {
+func (n *FSNode) ReadAll(ctx context.Context) (res []byte, err error) {
+	start := time.Now()
+	defer func() {
+		if err != nil {
+			log.Printf("ReadAll %s: error: %s", n.hash, err)
+		} else {
+			log.Printf("ReadAll %s: %d bytes in %s", n.hash, len(res), time.Since(start))
+		}
+	}()
+
+	if large := n.fs.conf.Large; large > 0 && n.size > large {
+		return n.readAllLarge(ctx)
+	}
+
 	obj := n.fs.bucket.Object(n.hash)
 	r, err := obj.NewReader(ctx)
 	if err != nil {
@@ -267,6 +329,35 @@ func (n *FSNode) ReadAll(ctx context.Context) ([]byte, error) {
 	}
 	defer r.Close()
 	return io.ReadAll(r)
+}
+
+func (n *FSNode) readAllLarge(ctx context.Context) ([]byte, error) {
+	obj := n.fs.bucket.Object(n.hash)
+	r, err := gcsobj.NewReader(ctx, obj)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+
+	var (
+		buf    = make([]byte, n.size)
+		offset uint64
+	)
+
+	for {
+		lim := offset + n.fs.conf.Chunk
+		if buflen := uint64(len(buf)); lim > buflen {
+			lim = buflen
+		}
+		nbytes, err := r.Read(buf[offset:lim])
+		offset += uint64(nbytes)
+		if err != nil || offset == uint64(len(buf)) {
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+			return buf[:offset], err
+		}
+	}
 }
 
 func (n *FSNode) findNode(name string, create bool) (*FSNode, error) {
