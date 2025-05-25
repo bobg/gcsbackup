@@ -25,7 +25,7 @@ import (
 	"github.com/seaweedfs/fuse/fs"
 )
 
-func (c maincmd) doFS(ctx context.Context, name, listfile, mountpoint, confFile string, _ []string) error {
+func (c maincmd) doFS(ctx context.Context, name, listfile, confFile, mountpoint string, _ []string) error {
 	start := time.Now()
 
 	log.Print("Building file system, please wait")
