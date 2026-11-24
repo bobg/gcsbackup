@@ -17,8 +17,8 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/bobg/atime/v2"
+	"github.com/bobg/errors"
 	"github.com/cenkalti/backoff/v4"
-	"github.com/pkg/errors"
 	"golang.org/x/time/rate"
 )
 

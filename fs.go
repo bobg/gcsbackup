@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/bobg/errors"
 	"github.com/bobg/gcsobj"
-	"github.com/pkg/errors"
 	"google.golang.org/api/iterator"
 	"gopkg.in/yaml.v3"
 
