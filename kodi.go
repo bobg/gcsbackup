@@ -16,7 +16,7 @@ import (
 	"github.com/bobg/gcsobj"
 	"github.com/bobg/go-generics/v2/maps"
 	"github.com/bobg/mid"
-	"github.com/pkg/errors"
+	"github.com/bobg/errors"
 )
 
 type kodi struct {

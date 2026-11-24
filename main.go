@@ -79,5 +79,14 @@ func (c maincmd) Subcmds() subcmd.Map {
 			"-cert", subcmd.String, "", "path to cert file",
 			"-key", subcmd.String, "", "path to key file",
 		),
+		"webdav", c.doWebDAV, "serve a gcsbackup file tree via WebDAV", subcmd.Params(
+			"-dir", subcmd.String, "", "directory to serve",
+			"-listen", subcmd.String, ":3524", "listen address",
+			"-username", subcmd.String, "", "HTTP Basic Auth username",
+			"-password", subcmd.String, "", "HTTP Basic Auth password", // TODO: move this to an env var
+			"-list", subcmd.String, "", "build file system from list output; use - to read from stdin",
+			"-cert", subcmd.String, "", "path to cert file",
+			"-key", subcmd.String, "", "path to key file",
+		),
 	)
 }
