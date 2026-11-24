@@ -43,8 +43,8 @@ func (g *fakeGCS) RoundTrip(req *http.Request) (*http.Response, error) {
 	// or the JSON API (/storage/v1/b/BUCKET/o/OBJECT?alt=media).
 	p := req.URL.EscapedPath()
 	var escaped string
-	if i := strings.Index(p, "/o/"); strings.Contains(p, "/storage/v1/b/") && i >= 0 {
-		escaped = p[i+len("/o/"):]
+	if _, after, ok0 := strings.Cut(p, "/o/"); strings.Contains(p, "/storage/v1/b/") && ok0 {
+		escaped = after
 	} else {
 		escaped = strings.TrimPrefix(p, "/"+g.bucket+"/")
 	}
