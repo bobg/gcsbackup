@@ -28,6 +28,8 @@ github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapp
 github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.63.0/go.mod h1:O5gqO+rsDs9p6eDe5MNSLfSIcoiw1iGqkyQbiiFCWhU=
 github.com/bobg/atime/v2 v2.2.1 h1:hU6h8Za1bWZkGO6K2Crpxrz9D57grYYxK1rbZb7NAv0=
 github.com/bobg/atime/v2 v2.2.1/go.mod h1:dg39gNNQnEMA+w9DCfHkTo6XT9keV9/jXd+879D5FJQ=
+github.com/bobg/certs v0.4.0 h1:nkdNjED86EPNqpqwjkux87H7Xh9dEWgVOr4vtLHl/eg=
+github.com/bobg/certs v0.4.0/go.mod h1:P1MDKrzw1ORNg+kF3IpgEGs5byx5aaL0fk5N5y+rnz4=
 github.com/bobg/ctrlc v0.0.0-20230506161000-af889a8b0b3b h1:KwaA2BX0OUeBmEAchMYb+vuB5o83Vt4kzWIYMx75gAQ=
 github.com/bobg/ctrlc v0.0.0-20230506161000-af889a8b0b3b/go.mod h1:LJB0xcIFmKh5kR1n7EGVu6FbmdOv/w08+SV3lxDcAW0=
 github.com/bobg/errors v1.4.0 h1:eEGNat8E+LGq0TLiD5MpOirwkHTc9ei11bQppW0S73Y=

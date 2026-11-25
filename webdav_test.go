@@ -1125,7 +1125,7 @@ func TestDoWebDAVErrors(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
-			err := c.doWebDAV(ctx, tc.dir, tc.listen, "", "", tc.listfile, "", "", nil)
+			err := c.doWebDAV(ctx, tc.dir, tc.listen, "", "", tc.listfile, "", nil)
 			if err == nil {
 				t.Fatal("got nil error")
 			}
@@ -1148,7 +1148,7 @@ func TestDoWebDAVShutdown(t *testing.T) {
 
 	errch := make(chan error, 1)
 	go func() {
-		errch <- c.doWebDAV(ctx, "movies", "127.0.0.1:0", "", "", listfile, "", "", nil)
+		errch <- c.doWebDAV(ctx, "movies", "127.0.0.1:0", "", "", listfile, "", nil)
 	}()
 
 	// Give the server a moment to start (or fail to start).

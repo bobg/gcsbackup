@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/subtle"
+	"crypto/tls"
 	_ "embed"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/bobg/certs"
 	"github.com/bobg/errors"
 	"github.com/bobg/gcsobj"
 	"golang.org/x/net/webdav"
@@ -29,7 +32,7 @@ type webdavType struct {
 	node               *FSNode
 }
 
-func (c maincmd) doWebDAV(ctx context.Context, dir, listen, username, password, listfile, certfile, keyfile string, _ []string) error {
+func (c maincmd) doWebDAV(ctx context.Context, dir, listen, username, password, listfile, certcmd string, _ []string) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -56,46 +59,129 @@ func (c maincmd) doWebDAV(ctx context.Context, dir, listen, username, password, 
 
 	wd.node = node
 
-	s := &http.Server{
+	h := &http.Server{
 		Addr:    listen,
 		Handler: wd.handler(),
 	}
 
-	log.Printf("Listening on %s", listen)
+	return serveWebDAV(ctx, h, certcmd)
+}
 
-	errch := make(chan error, 1)
-	go func() {
-		var err error
-		if certfile != "" && keyfile != "" {
-			err = s.ListenAndServeTLS(certfile, keyfile)
-		} else {
-			err = s.ListenAndServe()
+func serveWebDAV(ctx context.Context, h *http.Server, certcmd string) (err error) {
+	if certcmd == "" {
+		return serveWebDAVWithCert(ctx, h, nil)
+	}
+
+	certCh, wait, err := certs.FromCommand(ctx, certcmd)
+	if err != nil {
+		return errors.Wrap(err, "launching cert command")
+	}
+	defer func() {
+		err2 := wait()
+		err = errors.Join(err, err2)
+	}()
+
+	var (
+		cert tls.Certificate
+		ok   bool
+	)
+
+	select {
+	case <-ctx.Done():
+		return context.Cause(ctx)
+
+	case cert, ok = <-certCh:
+		if !ok {
+			return fmt.Errorf("cert command exited before producing a certificate")
 		}
-		err = errors.Prune(err, http.ErrServerClosed)
-		errch <- err
+	}
+
+	for {
+		newCertPtr, err := serveWebDAV2(ctx, h, certCh, cert)
+		if err != nil {
+			return errors.Wrap(err, "serving with certificate")
+		}
+		cert = *newCertPtr
+	}
+}
+
+func serveWebDAV2(outerCtx context.Context, h *http.Server, certCh <-chan tls.Certificate, cert tls.Certificate) (*tls.Certificate, error) {
+	ctx, cancel := context.WithCancelCause(outerCtx)
+	defer cancel(nil)
+
+	errCh := make(chan error, 1)
+
+	go func() {
+		errCh <- serveWebDAVWithCert(ctx, h, &cert)
+		close(errCh)
 	}()
 
 	select {
-	case err := <-errch:
-		// Server exited on its own (e.g. could not bind the listen address).
-		return errors.Wrap(err, "serving")
+	case <-outerCtx.Done():
+		return nil, context.Cause(outerCtx)
 
+	case err := <-errCh: // TODO: can err be nil here?
+		if outerCtx.Err() == nil {
+			err = errors.Prune(err, context.Canceled)
+		}
+		return nil, errors.Wrap(err, "error from goroutine")
+
+	case newCert, ok := <-certCh:
+		if !ok {
+			return nil, fmt.Errorf("cert command exited")
+		}
+
+		cancel(nil)
+
+		err := <-errCh
+		if outerCtx.Err() == nil {
+			err = errors.Prune(err, http.ErrServerClosed)
+		}
+
+		return &newCert, errors.Wrap(err, "after canceling goroutine")
+	}
+}
+
+func serveWebDAVWithCert(ctx context.Context, h *http.Server, cert *tls.Certificate) error {
+	if cert != nil {
+		h.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{*cert},
+		}
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("Listening on %s", h.Addr)
+		if cert != nil {
+			errCh <- h.ListenAndServeTLS("", "")
+		} else {
+			errCh <- h.ListenAndServe()
+		}
+		close(errCh)
+	}()
+
+	select {
 	case <-ctx.Done():
+		log.Print("Context canceled, shutting down server")
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		err := h.Shutdown(shutdownCtx)
+		err = errors.Prune(err, http.ErrServerClosed)
+		if err != nil {
+			return errors.Wrap(err, "shutting down server")
+		}
+
+		err = <-errCh
+		err = errors.Prune(err, http.ErrServerClosed)
+		return errors.Wrap(err, "in ListenAndServe, after shutdown")
+
+	case err := <-errCh:
+		// Server exited on its own (e.g. could not bind the listen address).
+		err = errors.Prune(err, http.ErrServerClosed)
+		return errors.Wrap(err, "in ListenAndServe")
 	}
-
-	log.Print("Context canceled, shutting down server")
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	err = s.Shutdown(shutdownCtx)
-	err = errors.Prune(err, http.ErrServerClosed)
-	if err != nil {
-		return errors.Wrap(err, "shutting down server")
-	}
-
-	err = <-errch
-	return errors.Wrap(err, "serving")
 }
 
 func (wd *webdavType) handler() http.Handler {
